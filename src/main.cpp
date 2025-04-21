@@ -53,7 +53,10 @@ namespace solution {
         m2_fs.close();
 
         CSRMatrix m1_sparse(n, k);
+        CSRMatrix m2_sparse(k, m);
+
         m1_sparse.from_dense(m1_dense.get(), n, k);
+        m2_sparse.from_dense(m2_dense.get(), k, m);
 
         auto result = std::make_unique<float[]>(n * m);
         std::fill(result.get(), result.get() + n * m, 0.0f);
@@ -64,20 +67,11 @@ namespace solution {
                 float val = m1_sparse.values[ptr];
                 int l = m1_sparse.col_indices[ptr];
 
-                for (int j = 0; j < m; j += 8) {
-                    if (j + 8 <= m) {
-                        __m256 val_vec = _mm256_set1_ps(val);
-                        __m256 m2_vec = _mm256_loadu_ps(&m2_dense[l * m + j]);
-                        __m256 res_vec = _mm256_loadu_ps(&result[i * m + j]);
+                for (int jptr = m2_sparse.row_ptrs[l]; jptr < m2_sparse.row_ptrs[l + 1]; jptr++) {
+                    int b_col = m2_sparse.col_indices[jptr];
+                    float b_val = m2_sparse.values[jptr];
 
-                        res_vec = _mm256_fmadd_ps(val_vec, m2_vec, res_vec);
-                        _mm256_storeu_ps(&result[i * m + j], res_vec);
-                    }
-                    else {
-                        for (int jj = j; jj < m; jj++) {
-                            result[i * m + jj] += val * m2_dense[l * m + jj];
-                        }
-                    }
+                    result[i * m + b_col] += val * b_val;
                 }
             }
         }
