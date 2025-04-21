@@ -22,7 +22,7 @@ struct CSRMatrix {
         row_ptrs.resize(r + 1, 0);
     }
 
-    void from_dense(const float* dense, int rows, int cols, float threshold = 1e-6f) {
+    void from_dense(const float* dense, int rows, int cols, float threshold = 1e-10f) {
         row_ptrs[0] = 0;
 
         for (int i = 0; i < rows; i++) {
@@ -48,7 +48,7 @@ struct CSCMatrix {
         col_ptrs.resize(c + 1, 0);
     }
 
-    void from_dense(const float* dense, int rows, int cols, float threshold = 1e-6f) {
+    void from_dense(const float* dense, int rows, int cols, float threshold = 1e-10f) {
         std::vector<int> col_counts(cols, 0);
         for (int j = 0; j < cols; j++) {
             for (int i = 0; i < rows; i++) {
