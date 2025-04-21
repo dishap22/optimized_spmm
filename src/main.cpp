@@ -104,36 +104,48 @@ namespace solution {
         m2_dense.reset();
 
         auto result = std::make_unique<float[]>(n * m);
-        std::fill(result.get(), result.get() + n * m, 0.0f);
+        float* __restrict res_ptr = result.get();
+        std::fill(res_ptr, res_ptr + n * m, 0.0f);
 
         int num_threads = 64;
         omp_set_num_threads(num_threads);
 
         #pragma omp parallel for schedule(dynamic, 16)
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < m; j++) {
-                float sum = 0.0f;
+        for (int idx = 0; idx < n * m; idx++) {
+            int i = idx / m;
+            int j = idx % m;
 
-                int ptrA = m1_sparse.row_ptrs[i];
-                int ptrB = m2_sparse.col_ptrs[j];
+            float sum = 0.0f;
 
-                while (ptrA < m1_sparse.row_ptrs[i + 1] && ptrB < m2_sparse.col_ptrs[j + 1]) {
-                    int colA = m1_sparse.col_indices[ptrA];
-                    int rowB = m2_sparse.row_indices[ptrB];
+            int ptrA = m1_sparse.row_ptrs[i];
+            int ptrB = m2_sparse.col_ptrs[j];
 
-                    if (colA < rowB) {
-                        ptrA++;
-                    } else if (colA > rowB) {
-                        ptrB++;
-                    } else {
-                        sum += m1_sparse.values[ptrA] * m2_sparse.values[ptrB];
-                        ptrA++;
-                        ptrB++;
-                    }
+            const int endA = m1_sparse.row_ptrs[i + 1];
+            const int endB = m2_sparse.col_ptrs[j + 1];
+
+            while (ptrA < endA && ptrB < endB) {
+                int colA = m1_sparse.col_indices[ptrA];
+                int rowB = m2_sparse.row_indices[ptrB];
+
+                if (ptrA + 4 < endA) {
+                    _mm_prefetch(reinterpret_cast<const char*>(&m1_sparse.col_indices[ptrA + 4]), _MM_HINT_T0);
+                }
+                if (ptrB + 4 < endB) {
+                    _mm_prefetch(reinterpret_cast<const char*>(&m2_sparse.row_indices[ptrB + 4]), _MM_HINT_T0);
                 }
 
-                result[i * m + j] = sum;
+                if (colA < rowB) {
+                    ptrA++;
+                } else if (colA > rowB) {
+                    ptrB++;
+                } else {
+                    sum += m1_sparse.values[ptrA] * m2_sparse.values[ptrB];
+                    ptrA++;
+                    ptrB++;
+                }
             }
+
+            res_ptr[idx] = sum;
         }
 
         sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
