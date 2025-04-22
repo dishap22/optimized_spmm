@@ -9,79 +9,124 @@
 #include <filesystem>
 #include <string>
 #include <vector>
-#include <unordered_map>
+#include <algorithm>
 #include <omp.h>
+#include <unordered_map>
+#include <cmath>
+
+struct CSRMatrix {
+    std::vector<float> values;
+    std::vector<int> col_indices;
+    std::vector<int> row_ptrs;
+    int rows, cols;
+
+    CSRMatrix(int r, int c) : rows(r), cols(c) {}
+
+    void from_dense_parallel(const float* dense, float threshold = 1e-10f) {
+        row_ptrs.resize(rows + 1);
+
+        std::vector<std::vector<float>> temp_vals(rows);
+        std::vector<std::vector<int>> temp_idx(rows);
+
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < rows; ++i) {
+            for (int j = 0; j < cols; ++j) {
+                float val = dense[i * cols + j];
+                if (std::abs(val) > threshold) {
+                    temp_vals[i].push_back(val);
+                    temp_idx[i].push_back(j);
+                }
+            }
+        }
+
+        row_ptrs[0] = 0;
+        for (int i = 0; i < rows; ++i) {
+            row_ptrs[i + 1] = row_ptrs[i] + temp_vals[i].size();
+            values.insert(values.end(), temp_vals[i].begin(), temp_vals[i].end());
+            col_indices.insert(col_indices.end(), temp_idx[i].begin(), temp_idx[i].end());
+        }
+    }
+
+    void from_transpose_dense_parallel(const float* dense, float threshold = 1e-10f) {
+        row_ptrs.resize(cols + 1);  // now rows = cols of original, each is a row of transposed
+        std::vector<std::vector<float>> temp_vals(cols);
+        std::vector<std::vector<int>> temp_idx(cols);
+
+        #pragma omp parallel for schedule(static)
+        for (int j = 0; j < cols; ++j) {
+            for (int i = 0; i < rows; ++i) {
+                float val = dense[i * cols + j];
+                if (std::abs(val) > threshold) {
+                    temp_vals[j].push_back(val);
+                    temp_idx[j].push_back(i);
+                }
+            }
+        }
+
+        row_ptrs[0] = 0;
+        for (int i = 0; i < cols; ++i) {
+            row_ptrs[i + 1] = row_ptrs[i] + temp_vals[i].size();
+            values.insert(values.end(), temp_vals[i].begin(), temp_vals[i].end());
+            col_indices.insert(col_indices.end(), temp_idx[i].begin(), temp_idx[i].end());
+        }
+        std::swap(rows, cols);  // match true layout after transpose
+    }
+};
 
 namespace solution {
-
-    struct SparseRow {
-        std::vector<int> cols;
-        std::vector<float> vals;
-    };
-
-    std::vector<SparseRow> denseToCSR(const float* mat, int rows, int cols, float epsilon = 1e-10f) {
-        std::vector<SparseRow> csr(rows);
-        #pragma omp parallel for schedule(dynamic)
-        for (int i = 0; i < rows; ++i) {
-            SparseRow row;
-            for (int j = 0; j < cols; ++j) {
-                float val = mat[i * cols + j];
-                if (std::abs(val) > epsilon) {
-                    row.cols.push_back(j);
-                    row.vals.push_back(val);
-                }
-            }
-            csr[i] = std::move(row);
-        }
-        return csr;
-    }
-
-    std::vector<std::unordered_map<int, float>> transposeAndCSR(const float* mat, int rows, int cols, float epsilon = 1e-10f) {
-        std::vector<std::unordered_map<int, float>> transposed(cols);
-        #pragma omp parallel for schedule(dynamic)
-        for (int i = 0; i < rows; ++i) {
-            for (int j = 0; j < cols; ++j) {
-                float val = mat[i * cols + j];
-                if (std::abs(val) > epsilon) {
-                    #pragma omp critical
-                    transposed[j][i] = val;
-                }
-            }
-        }
-        return transposed;
-    }
-
     std::string compute(const std::string &m1_path, const std::string &m2_path, int n, int k, int m) {
         std::string sol_path = std::filesystem::temp_directory_path() / "student_sol.dat";
         std::ofstream sol_fs(sol_path, std::ios::binary);
         std::ifstream m1_fs(m1_path, std::ios::binary), m2_fs(m2_path, std::ios::binary);
 
-        std::unique_ptr<float[]> m1 = std::make_unique<float[]>(n * k);
-        std::unique_ptr<float[]> m2 = std::make_unique<float[]>(k * m);
-        m1_fs.read(reinterpret_cast<char*>(m1.get()), sizeof(float) * n * k);
-        m2_fs.read(reinterpret_cast<char*>(m2.get()), sizeof(float) * k * m);
-        m1_fs.close(); m2_fs.close();
+        auto m1_dense = std::make_unique<float[]>(n * k);
+        auto m2_dense = std::make_unique<float[]>(k * m);
 
-        auto m1_csr = denseToCSR(m1.get(), n, k);
-        auto m2_csc = transposeAndCSR(m2.get(), k, m);
+        m1_fs.read(reinterpret_cast<char*>(m1_dense.get()), sizeof(float) * n * k);
+        m2_fs.read(reinterpret_cast<char*>(m2_dense.get()), sizeof(float) * k * m);
+        m1_fs.close();
+        m2_fs.close();
 
-        std::unique_ptr<float[]> result = std::make_unique<float[]>(n * m);
-        std::fill(result.get(), result.get() + n * m, 0.0f);
+        // Convert to CSR
+        CSRMatrix m1_csr(n, k);
+        m1_csr.from_dense_parallel(m1_dense.get());
 
-        #pragma omp parallel for schedule(dynamic) num_threads(64)
+        CSRMatrix m2t_csr(m, k);  // Transposed version of m2 (row-wise access for columns)
+        m2t_csr.from_transpose_dense_parallel(m2_dense.get());
+
+        auto result = std::make_unique<float[]>(n * m);
+        float* __restrict res = result.get();
+
+        #pragma omp parallel for schedule(dynamic, 4) num_threads(16)
         for (int i = 0; i < n; ++i) {
-            const auto& row = m1_csr[i];
-            for (int col = 0; col < m; ++col) {
+            float* out_row = res + i * m;
+
+            int row_start_A = m1_csr.row_ptrs[i];
+            int row_end_A = m1_csr.row_ptrs[i + 1];
+
+            for (int j = 0; j < m; ++j) {
+                int row_start_B = m2t_csr.row_ptrs[j];
+                int row_end_B = m2t_csr.row_ptrs[j + 1];
+
                 float sum = 0.0f;
-                const auto& m2_row = m2_csc[col];
-                for (size_t idx = 0; idx < row.cols.size(); ++idx) {
-                    int k_index = row.cols[idx];
-                    auto it = m2_row.find(k_index);
-                    if (it != m2_row.end()) {
-                        sum += row.vals[idx] * it->second;
+                int ptrA = row_start_A, ptrB = row_start_B;
+
+                while (ptrA < row_end_A && ptrB < row_end_B) {
+                    int colA = m1_csr.col_indices[ptrA];
+                    int colB = m2t_csr.col_indices[ptrB];
+
+                    if (colA < colB) {
+                        ++ptrA;
+                    } else if (colA > colB) {
+                        ++ptrB;
+                    } else {
+                        sum += m1_csr.values[ptrA] * m2t_csr.values[ptrB];
+                        ++ptrA;
+                        ++ptrB;
                     }
                 }
-                result[i * m + col] = sum;
+
+                out_row[j] = sum;
             }
         }
 
@@ -89,4 +134,4 @@ namespace solution {
         sol_fs.close();
         return sol_path;
     }
-}
+};
