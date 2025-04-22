@@ -91,13 +91,12 @@ namespace solution {
         CSRMatrix A(n, k);
         A.from_dense_parallel(m1_dense.get());
 
-        CSRMatrix BT(m, k); // B^T
+        CSRMatrix BT(m, k);
         BT.from_transpose_dense_parallel(m2_dense.get());
 
         auto result = std::make_unique<float[]>(n * m);
         float* __restrict res = result.get();
 
-        // Outer loop is over A's rows
         #pragma omp parallel
         {
             std::vector<float> local_accum(m, 0.0f);
