@@ -19,7 +19,7 @@ namespace solution {
         std::vector<float> vals;
     };
 
-    std::vector<SparseRow> denseToCSR(const float* mat, int rows, int cols, float epsilon = 1e-6f) {
+    std::vector<SparseRow> denseToCSR(const float* mat, int rows, int cols, float epsilon = 1e-10f) {
         std::vector<SparseRow> csr(rows);
         #pragma omp parallel for schedule(dynamic)
         for (int i = 0; i < rows; ++i) {
@@ -36,7 +36,7 @@ namespace solution {
         return csr;
     }
 
-    std::vector<std::unordered_map<int, float>> transposeAndCSR(const float* mat, int rows, int cols, float epsilon = 1e-6f) {
+    std::vector<std::unordered_map<int, float>> transposeAndCSR(const float* mat, int rows, int cols, float epsilon = 1e-10f) {
         std::vector<std::unordered_map<int, float>> transposed(cols);
         #pragma omp parallel for schedule(dynamic)
         for (int i = 0; i < rows; ++i) {
