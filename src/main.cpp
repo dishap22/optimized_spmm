@@ -24,7 +24,6 @@ struct CSRMatrix {
 
     void from_dense_parallel(const float* dense, float threshold = 1e-10f) {
         row_ptrs.resize(rows + 1);
-
         std::vector<std::vector<float>> temp_vals(rows);
         std::vector<std::vector<int>> temp_idx(rows);
 
@@ -96,40 +95,50 @@ namespace solution {
         auto result = std::make_unique<float[]>(n * m);
         float* __restrict res = result.get();
 
-        #pragma omp parallel for schedule(dynamic, 4) num_threads(64)
-        for (int i = 0; i < n; ++i) {
-            float* out_row = res + i * m;
+        #pragma omp parallel num_threads(16)
+        {
+            std::vector<float> tmp(m);
+            float* tmp_ptr = tmp.data();
+            const int m_aligned = m - (m % 8);
 
-            int row_start_A = m1_csr.row_ptrs[i];
-            int row_end_A = m1_csr.row_ptrs[i + 1];
+            #pragma omp for schedule(static, 4)
+            for (int i = 0; i < n; ++i) {
+                int j = 0;
+                for (; j + 7 < m; j += 8) {
+                    _mm256_storeu_ps(tmp_ptr + j, _mm256_setzero_ps());
+                }
+                for (; j < m; ++j) {
+                    tmp_ptr[j] = 0.0f;
+                }
 
-            for (int j = 0; j < m; ++j) {
-                int row_start_B = m2t_csr.row_ptrs[j];
-                int row_end_B = m2t_csr.row_ptrs[j + 1];
+                const int row_start = m1_csr.row_ptrs[i];
+                const int row_end = m1_csr.row_ptrs[i + 1];
 
-                float sum = 0.0f;
-                int ptrA = row_start_A, ptrB = row_start_B;
+                for (int ptrA = row_start; ptrA < row_end; ++ptrA) {
+                    const int k = m1_csr.col_indices[ptrA];
+                    const float valA = m1_csr.values[ptrA];
 
-                while (ptrA < row_end_A && ptrB < row_end_B) {
-                    int colA = m1_csr.col_indices[ptrA];
-                    int colB = m2t_csr.col_indices[ptrB];
+                    const int bt_row_start = m2t_csr.row_ptrs[k];
+                    const int bt_row_end = m2t_csr.row_ptrs[k + 1];
 
-                    if (colA < colB) {
-                        ++ptrA;
-                    } else if (colA > colB) {
-                        ++ptrB;
-                    } else {
-                        sum += m1_csr.values[ptrA] * m2t_csr.values[ptrB];
-                        ++ptrA;
-                        ++ptrB;
+                    for (int ptrB = bt_row_start; ptrB < bt_row_end; ++ptrB) {
+                        const int j = m2t_csr.col_indices[ptrB];
+                        tmp_ptr[j] += valA * m2t_csr.values[ptrB];
                     }
                 }
 
-                out_row[j] = sum;
+                float* out_row = res + i * m;
+                j = 0;
+                for (; j + 7 < m; j += 8) {
+                    _mm256_storeu_ps(out_row + j, _mm256_loadu_ps(tmp_ptr + j));
+                }
+                for (; j < m; ++j) {
+                    out_row[j] = tmp_ptr[j];
+                }
             }
         }
 
-        sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
+        sol_fs.write(reinterpret_cast<const char*>(res), sizeof(float) * n * m);
         sol_fs.close();
         return sol_path;
     }
