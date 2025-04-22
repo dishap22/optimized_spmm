@@ -48,7 +48,7 @@ struct CSRMatrix {
     }
 
     void from_transpose_dense_parallel(const float* dense, float threshold = 1e-10f) {
-        row_ptrs.resize(cols + 1);  // now rows = cols of original, each is a row of transposed
+        row_ptrs.resize(cols + 1);
         std::vector<std::vector<float>> temp_vals(cols);
         std::vector<std::vector<int>> temp_idx(cols);
 
@@ -69,7 +69,7 @@ struct CSRMatrix {
             values.insert(values.end(), temp_vals[i].begin(), temp_vals[i].end());
             col_indices.insert(col_indices.end(), temp_idx[i].begin(), temp_idx[i].end());
         }
-        std::swap(rows, cols);  // match true layout after transpose
+        std::swap(rows, cols);
     }
 };
 
@@ -87,17 +87,16 @@ namespace solution {
         m1_fs.close();
         m2_fs.close();
 
-        // Convert to CSR
         CSRMatrix m1_csr(n, k);
         m1_csr.from_dense_parallel(m1_dense.get());
 
-        CSRMatrix m2t_csr(m, k);  // Transposed version of m2 (row-wise access for columns)
+        CSRMatrix m2t_csr(m, k);
         m2t_csr.from_transpose_dense_parallel(m2_dense.get());
 
         auto result = std::make_unique<float[]>(n * m);
         float* __restrict res = result.get();
 
-        #pragma omp parallel for schedule(dynamic, 4) num_threads(16)
+        #pragma omp parallel for schedule(dynamic, 4) num_threads(64)
         for (int i = 0; i < n; ++i) {
             float* out_row = res + i * m;
 
