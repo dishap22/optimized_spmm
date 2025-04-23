@@ -1,5 +1,5 @@
 #pragma GCC optimize("O3,unroll-loops")
-#pragma GCC target("avx512f,avx512dq,avx512vl,avx512bw,bmi,bmi2,lzcnt,popcnt")
+#pragma GCC target("avx2,bmi,bmi2,lzcnt,popcnt")
 
 #include <immintrin.h>
 #include <iostream>
@@ -22,8 +22,9 @@ struct CSRMatrix {
 
     CSRMatrix(int r, int c) : rows(r), cols(c) {}
 
-    void from_dense_parallel(const float* dense, float threshold = 1e-12f) {
+    void from_dense_parallel(const float* dense, float threshold = 1e-10f) {
         row_ptrs.resize(rows + 1);
+
         std::vector<std::vector<float>> temp_vals(rows);
         std::vector<std::vector<int>> temp_idx(rows);
 
@@ -40,21 +41,13 @@ struct CSRMatrix {
 
         row_ptrs[0] = 0;
         for (int i = 0; i < rows; ++i) {
-            std::vector<std::pair<int, float>> row;
-            for (size_t j = 0; j < temp_vals[i].size(); ++j)
-                row.emplace_back(temp_idx[i][j], temp_vals[i][j]);
-            std::sort(row.begin(), row.end());
-
-            for (auto& p : row) {
-                col_indices.push_back(p.first);
-                values.push_back(p.second);
-            }
-
-            row_ptrs[i + 1] = row_ptrs[i] + static_cast<int>(row.size());
+            row_ptrs[i + 1] = row_ptrs[i] + temp_vals[i].size();
+            values.insert(values.end(), temp_vals[i].begin(), temp_vals[i].end());
+            col_indices.insert(col_indices.end(), temp_idx[i].begin(), temp_idx[i].end());
         }
     }
 
-    void from_transpose_dense_parallel(const float* dense, float threshold = 1e-12f) {
+    void from_transpose_dense_parallel(const float* dense, float threshold = 1e-10f) {
         row_ptrs.resize(cols + 1);
         std::vector<std::vector<float>> temp_vals(cols);
         std::vector<std::vector<int>> temp_idx(cols);
@@ -72,19 +65,10 @@ struct CSRMatrix {
 
         row_ptrs[0] = 0;
         for (int i = 0; i < cols; ++i) {
-            std::vector<std::pair<int, float>> row;
-            for (size_t j = 0; j < temp_vals[i].size(); ++j)
-                row.emplace_back(temp_idx[i][j], temp_vals[i][j]);
-            std::sort(row.begin(), row.end());
-
-            for (auto& p : row) {
-                col_indices.push_back(p.first);
-                values.push_back(p.second);
-            }
-
-            row_ptrs[i + 1] = row_ptrs[i] + static_cast<int>(row.size());
+            row_ptrs[i + 1] = row_ptrs[i] + temp_vals[i].size();
+            values.insert(values.end(), temp_vals[i].begin(), temp_vals[i].end());
+            col_indices.insert(col_indices.end(), temp_idx[i].begin(), temp_idx[i].end());
         }
-
         std::swap(rows, cols);
     }
 };
@@ -97,11 +81,6 @@ namespace solution {
 
         auto m1_dense = std::make_unique<float[]>(n * k);
         auto m2_dense = std::make_unique<float[]>(k * m);
-
-        #pragma omp parallel for
-        for (int i = 0; i < n * k; ++i) m1_dense[i] = 0;
-        #pragma omp parallel for
-        for (int i = 0; i < k * m; ++i) m2_dense[i] = 0;
 
         m1_fs.read(reinterpret_cast<char*>(m1_dense.get()), sizeof(float) * n * k);
         m2_fs.read(reinterpret_cast<char*>(m2_dense.get()), sizeof(float) * k * m);
@@ -117,16 +96,19 @@ namespace solution {
         auto result = std::make_unique<float[]>(n * m);
         float* __restrict res = result.get();
 
-        #pragma omp parallel for collapse(2) schedule(guided, 1) num_threads(64)
+        #pragma omp parallel for schedule(dynamic, 4) num_threads(64)
         for (int i = 0; i < n; ++i) {
+            float* out_row = res + i * m;
+
+            int row_start_A = m1_csr.row_ptrs[i];
+            int row_end_A = m1_csr.row_ptrs[i + 1];
+
             for (int j = 0; j < m; ++j) {
-                int row_start_A = m1_csr.row_ptrs[i];
-                int row_end_A = m1_csr.row_ptrs[i + 1];
                 int row_start_B = m2t_csr.row_ptrs[j];
                 int row_end_B = m2t_csr.row_ptrs[j + 1];
 
+                float sum = 0.0f;
                 int ptrA = row_start_A, ptrB = row_start_B;
-                double sum = 0.0;
 
                 while (ptrA < row_end_A && ptrB < row_end_B) {
                     int colA = m1_csr.col_indices[ptrA];
@@ -137,16 +119,15 @@ namespace solution {
                     } else if (colA > colB) {
                         ++ptrB;
                     } else {
-                        sum += static_cast<double>(m1_csr.values[ptrA]) * static_cast<double>(m2t_csr.values[ptrB]);
+                        sum += m1_csr.values[ptrA] * m2t_csr.values[ptrB];
                         ++ptrA;
                         ++ptrB;
                     }
                 }
 
-                res[i * m + j] = static_cast<float>(sum);
+                out_row[j] = sum;
             }
         }
-
 
         sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
         sol_fs.close();
