@@ -125,9 +125,8 @@ namespace solution {
                 int row_start_B = m2t_csr.row_ptrs[j];
                 int row_end_B = m2t_csr.row_ptrs[j + 1];
 
-                __m512 sum = _mm512_setzero_ps();
-
                 int ptrA = row_start_A, ptrB = row_start_B;
+                double sum = 0.0;
 
                 while (ptrA < row_end_A && ptrB < row_end_B) {
                     int colA = m1_csr.col_indices[ptrA];
@@ -138,27 +137,16 @@ namespace solution {
                     } else if (colA > colB) {
                         ++ptrB;
                     } else {
-                        __m512 valA = _mm512_set1_ps(m1_csr.values[ptrA]);
-                        __m512 valB = _mm512_set1_ps(m2t_csr.values[ptrB]);
-
-                        __m512 prod = _mm512_mul_ps(valA, valB);
-                        sum = _mm512_add_ps(sum, prod);
-
-
+                        sum += static_cast<double>(m1_csr.values[ptrA]) * static_cast<double>(m2t_csr.values[ptrB]);
                         ++ptrA;
                         ++ptrB;
                     }
                 }
 
-
-                float row_sum[16];
-                _mm512_storeu_ps(row_sum, sum);
-                res[i * m + j] = 0.0f;
-                for (int idx = 0; idx < 16; ++idx) {
-                    res[i * m + j] += row_sum[idx];
-                }
+                res[i * m + j] = static_cast<float>(sum);
             }
         }
+
 
         sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
         sol_fs.close();
