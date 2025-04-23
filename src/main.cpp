@@ -90,11 +90,10 @@ namespace solution {
         m1_fs.close();
         m2_fs.close();
 
-        // Convert to CSR and transposed CSR
         CSRMatrix m1_csr(n, k);
         m1_csr.from_dense_parallel(m1_dense.get());
 
-        CSRMatrix m2t_csr(m, k); // transposed layout
+        CSRMatrix m2t_csr(m, k);
         m2t_csr.from_transpose_dense_parallel(m2_dense.get());
 
         auto result = std::make_unique<float[]>(n * m);
@@ -128,7 +127,6 @@ namespace solution {
                 }
             }
         }
-
 
         sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
         sol_fs.close();
