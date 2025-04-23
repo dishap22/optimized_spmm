@@ -29,11 +29,12 @@ struct CSRMatrix {
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < rows; ++i) {
             int count = 0;
-            for (int j = 0; j < cols; ++j) {
-                float val = dense[i * cols + j];
-                if (std::abs(val) > threshold) {
-                    count++;
-                }
+            for (int j = 0; j < cols; j += 16) {
+                __m512 val = _mm512_loadu_ps(&dense[i * cols + j]);
+                __m512 threshold_vec = _mm512_set1_ps(threshold);
+
+                __mmask16 mask = _mm512_cmp_ps_mask(val, threshold_vec, _CMP_GT_OS); // Compare values to threshold
+                count += _mm_popcnt_u32(mask);
             }
             row_nnz[i] = count;
         }
@@ -51,16 +52,22 @@ struct CSRMatrix {
         for (int i = 0; i < rows; ++i) {
             int offset = row_ptrs[i];
             int idx = 0;
-            for (int j = 0; j < cols; ++j) {
-                float val = dense[i * cols + j];
-                if (std::abs(val) > threshold) {
-                    values[offset + idx] = val;
-                    col_indices[offset + idx] = j;
-                    idx++;
+            for (int j = 0; j < cols; j += 16) {
+                __m512 val = _mm512_loadu_ps(&dense[i * cols + j]);
+                __m512 threshold_vec = _mm512_set1_ps(threshold);
+                __mmask16 mask = _mm512_cmp_ps_mask(val, threshold_vec, _CMP_GT_OS);
+
+                for (int k = 0; k < 16; ++k) {
+                    if (mask & (1 << k)) {
+                        values[offset + idx] = dense[i * cols + j + k];
+                        col_indices[offset + idx] = j + k;
+                        idx++;
+                    }
                 }
             }
         }
     }
+
 
 
     void from_transpose_dense_parallel(const float* dense, float threshold = 1e-10f) {
