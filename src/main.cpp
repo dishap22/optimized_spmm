@@ -99,33 +99,35 @@ namespace solution {
         #pragma omp parallel for
         for (int i = 0; i < n * m; ++i) res[i] = 0.0f;
 
+        const int TILE = 64;
         #pragma omp parallel for schedule(static) num_threads(64)
         for (int i = 0; i < n; ++i) {
             float* out_row = res + i * m;
-
             int row_start_A = m1_csr.row_ptrs[i];
             int row_end_A = m1_csr.row_ptrs[i + 1];
 
-            for (int j = 0; j < m; ++j) {
-                int row_start_B = m2t_csr.row_ptrs[j];
-                int row_end_B = m2t_csr.row_ptrs[j + 1];
+            for (int jj = 0; jj < m; jj += TILE) {
+                for (int j = jj; j < std::min(jj + TILE, m); ++j) {
+                    int row_start_B = m2t_csr.row_ptrs[j];
+                    int row_end_B = m2t_csr.row_ptrs[j + 1];
 
-                double sum = 0.0;
-                int a = row_start_A, b = row_start_B;
+                    double sum = 0.0;
+                    int a = row_start_A, b = row_start_B;
 
-                while (a < row_end_A && b < row_end_B) {
-                    int colA = m1_csr.col_indices[a];
-                    int colB = m2t_csr.col_indices[b];
+                    while (a < row_end_A && b < row_end_B) {
+                        int colA = m1_csr.col_indices[a];
+                        int colB = m2t_csr.col_indices[b];
 
-                    sum += (colA == colB) * static_cast<double>(m1_csr.values[a]) * m2t_csr.values[b];
-                    a += (colA <= colB);
-                    b += (colA >= colB);
+                        sum += (colA == colB) * static_cast<double>(m1_csr.values[a]) * m2t_csr.values[b];
+                        a += (colA <= colB);
+                        b += (colA >= colB);
+                    }
+
+                    out_row[j] = static_cast<float>(sum);
                 }
-
-                out_row[j] = static_cast<float>(sum);
-
             }
         }
+
 
         sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
         sol_fs.close();
