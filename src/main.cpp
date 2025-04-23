@@ -96,7 +96,10 @@ namespace solution {
         auto result = std::make_unique<float[]>(n * m);
         float* __restrict res = result.get();
 
-        #pragma omp parallel for schedule(dynamic, 4) num_threads(64)
+        #pragma omp parallel for
+        for (int i = 0; i < n * m; ++i) res[i] = 0.0f;
+
+        #pragma omp parallel for schedule(static) num_threads(64)
         for (int i = 0; i < n; ++i) {
             float* out_row = res + i * m;
 
@@ -107,25 +110,20 @@ namespace solution {
                 int row_start_B = m2t_csr.row_ptrs[j];
                 int row_end_B = m2t_csr.row_ptrs[j + 1];
 
-                float sum = 0.0f;
-                int ptrA = row_start_A, ptrB = row_start_B;
+                double sum = 0.0;
+                int a = row_start_A, b = row_start_B;
 
-                while (ptrA < row_end_A && ptrB < row_end_B) {
-                    int colA = m1_csr.col_indices[ptrA];
-                    int colB = m2t_csr.col_indices[ptrB];
+                while (a < row_end_A && b < row_end_B) {
+                    int colA = m1_csr.col_indices[a];
+                    int colB = m2t_csr.col_indices[b];
 
-                    if (colA < colB) {
-                        ++ptrA;
-                    } else if (colA > colB) {
-                        ++ptrB;
-                    } else {
-                        sum += m1_csr.values[ptrA] * m2t_csr.values[ptrB];
-                        ++ptrA;
-                        ++ptrB;
-                    }
+                    sum += (colA == colB) * static_cast<double>(m1_csr.values[a]) * m2t_csr.values[b];
+                    a += (colA <= colB);
+                    b += (colA >= colB);
                 }
 
-                out_row[j] = sum;
+                out_row[j] = static_cast<float>(sum);
+
             }
         }
 
