@@ -65,28 +65,45 @@ struct CSRMatrix {
 
     void from_transpose_dense_parallel(const float* dense, float threshold = 1e-10f) {
         row_ptrs.resize(cols + 1);
-        std::vector<std::vector<float>> temp_vals(cols);
-        std::vector<std::vector<int>> temp_idx(cols);
+        std::vector<int> col_nnz(cols, 0);
 
         #pragma omp parallel for schedule(static)
         for (int j = 0; j < cols; ++j) {
+            int count = 0;
+            for (int i = 0; i < rows; ++i) {
+                if (std::abs(dense[i * cols + j]) > threshold) {
+                    count++;
+                }
+            }
+            col_nnz[j] = count;
+        }
+
+        row_ptrs[0] = 0;
+        for (int j = 0; j < cols; ++j) {
+            row_ptrs[j + 1] = row_ptrs[j] + col_nnz[j];
+        }
+
+        int nnz = row_ptrs[cols];
+        values.resize(nnz);
+        col_indices.resize(nnz);
+
+        #pragma omp parallel for schedule(static)
+        for (int j = 0; j < cols; ++j) {
+            int offset = row_ptrs[j];
+            int idx = 0;
             for (int i = 0; i < rows; ++i) {
                 float val = dense[i * cols + j];
                 if (std::abs(val) > threshold) {
-                    temp_vals[j].push_back(val);
-                    temp_idx[j].push_back(i);
+                    values[offset + idx] = val;
+                    col_indices[offset + idx] = i;
+                    idx++;
                 }
             }
         }
 
-        row_ptrs[0] = 0;
-        for (int i = 0; i < cols; ++i) {
-            row_ptrs[i + 1] = row_ptrs[i] + temp_vals[i].size();
-            values.insert(values.end(), temp_vals[i].begin(), temp_vals[i].end());
-            col_indices.insert(col_indices.end(), temp_idx[i].begin(), temp_idx[i].end());
-        }
         std::swap(rows, cols);
     }
+
 };
 
 namespace solution {
