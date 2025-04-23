@@ -13,7 +13,6 @@
 #include <omp.h>
 #include <unordered_map>
 #include <cmath>
-#include <cstring>
 
 struct CSRMatrix {
     std::vector<float> values;
@@ -88,52 +87,45 @@ namespace solution {
         m1_fs.close();
         m2_fs.close();
 
-        CSRMatrix A(n, k);
-        A.from_dense_parallel(m1_dense.get());
+        CSRMatrix m1_csr(n, k);
+        m1_csr.from_dense_parallel(m1_dense.get());
 
-        CSRMatrix BT(m, k);
-        BT.from_transpose_dense_parallel(m2_dense.get());
+        CSRMatrix m2t_csr(m, k);
+        m2t_csr.from_transpose_dense_parallel(m2_dense.get());
 
         auto result = std::make_unique<float[]>(n * m);
         float* __restrict res = result.get();
 
-        #pragma omp parallel
-        {
-            std::vector<float> local_accum(m, 0.0f);
-            std::vector<char> mask(m, 0);
+        #pragma omp parallel for schedule(dynamic, 4) num_threads(64)
+        for (int i = 0; i < n; ++i) {
+            float* out_row = res + i * m;
 
-            #pragma omp for schedule(static)
-            for (int i = 0; i < A.rows; ++i) {
-                float* out_row = res + i * m;
-                std::fill(local_accum.begin(), local_accum.end(), 0.0f);
-                std::fill(mask.begin(), mask.end(), 0);
+            int row_start_A = m1_csr.row_ptrs[i];
+            int row_end_A = m1_csr.row_ptrs[i + 1];
 
-                int startA = A.row_ptrs[i];
-                int endA = A.row_ptrs[i + 1];
+            for (int j = 0; j < m; ++j) {
+                int row_start_B = m2t_csr.row_ptrs[j];
+                int row_end_B = m2t_csr.row_ptrs[j + 1];
 
-                for (int idxA = startA; idxA < endA; ++idxA) {
-                    int colA = A.col_indices[idxA];
-                    float valA = A.values[idxA];
+                float sum = 0.0f;
+                int ptrA = row_start_A, ptrB = row_start_B;
 
-                    int startB = BT.row_ptrs[colA];
-                    int endB = BT.row_ptrs[colA + 1];
+                while (ptrA < row_end_A && ptrB < row_end_B) {
+                    int colA = m1_csr.col_indices[ptrA];
+                    int colB = m2t_csr.col_indices[ptrB];
 
-                    for (int idxB = startB; idxB < endB; ++idxB) {
-                        int j = BT.col_indices[idxB];
-                        float valB = BT.values[idxB];
-
-                        if (!mask[j]) {
-                            mask[j] = 1;
-                            local_accum[j] = valA * valB;
-                        } else {
-                            local_accum[j] += valA * valB;
-                        }
+                    if (colA < colB) {
+                        ++ptrA;
+                    } else if (colA > colB) {
+                        ++ptrB;
+                    } else {
+                        sum += m1_csr.values[ptrA] * m2t_csr.values[ptrB];
+                        ++ptrA;
+                        ++ptrB;
                     }
                 }
 
-                for (int j = 0; j < m; ++j) {
-                    out_row[j] = local_accum[j];
-                }
+                out_row[j] = sum;
             }
         }
 
@@ -141,4 +133,4 @@ namespace solution {
         sol_fs.close();
         return sol_path;
     }
-}
+};
