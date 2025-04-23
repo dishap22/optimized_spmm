@@ -99,7 +99,7 @@ namespace solution {
         #pragma omp parallel for
         for (int i = 0; i < n * m; ++i) res[i] = 0.0f;
 
-        const int TILE = 128;
+        const int TILE = 32;
         #pragma omp parallel for schedule(static) num_threads(64)
         for (int i = 0; i < n; ++i) {
             float* out_row = res + i * m;
