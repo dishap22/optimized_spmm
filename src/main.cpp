@@ -22,7 +22,7 @@ struct CSRMatrix {
 
     CSRMatrix(int r, int c) : rows(r), cols(c) {}
 
-    void from_dense_parallel(const float* dense, float threshold = 1e-10f) {
+    void from_dense_parallel(const float* dense, float threshold = 1e-12f) {
         row_ptrs.resize(rows + 1);
         std::vector<std::vector<float>> temp_vals(rows);
         std::vector<std::vector<int>> temp_idx(rows);
@@ -54,7 +54,7 @@ struct CSRMatrix {
         }
     }
 
-    void from_transpose_dense_parallel(const float* dense, float threshold = 1e-10f) {
+    void from_transpose_dense_parallel(const float* dense, float threshold = 1e-12f) {
         row_ptrs.resize(cols + 1);
         std::vector<std::vector<float>> temp_vals(cols);
         std::vector<std::vector<int>> temp_idx(cols);
@@ -141,7 +141,9 @@ namespace solution {
                         __m512 valA = _mm512_set1_ps(m1_csr.values[ptrA]);
                         __m512 valB = _mm512_set1_ps(m2t_csr.values[ptrB]);
 
-                        sum = _mm512_fmadd_ps(valA, valB, sum);
+                        __m512 prod = _mm512_mul_ps(valA, valB);
+                        sum = _mm512_add_ps(sum, prod);
+
 
                         ++ptrA;
                         ++ptrB;
