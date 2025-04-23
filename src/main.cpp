@@ -74,6 +74,9 @@ struct CSRMatrix {
 };
 
 namespace solution {
+
+    constexpr int TILE_SIZE = 64;
+
     std::string compute(const std::string &m1_path, const std::string &m2_path, int n, int k, int m) {
         std::string sol_path = std::filesystem::temp_directory_path() / "student_sol.dat";
         std::ofstream sol_fs(sol_path, std::ios::binary);
@@ -87,47 +90,45 @@ namespace solution {
         m1_fs.close();
         m2_fs.close();
 
+        // Convert to CSR and transposed CSR
         CSRMatrix m1_csr(n, k);
         m1_csr.from_dense_parallel(m1_dense.get());
 
-        CSRMatrix m2t_csr(m, k);
+        CSRMatrix m2t_csr(m, k); // transposed layout
         m2t_csr.from_transpose_dense_parallel(m2_dense.get());
 
         auto result = std::make_unique<float[]>(n * m);
         float* __restrict res = result.get();
 
-        #pragma omp parallel for schedule(dynamic, 4) num_threads(64)
-        for (int i = 0; i < n; ++i) {
-            float* out_row = res + i * m;
+        #pragma omp parallel for collapse(2) schedule(dynamic, 4) num_threads(16)
+        for (int bi = 0; bi < n; bi += TILE_SIZE) {
+            for (int bj = 0; bj < m; bj += TILE_SIZE) {
 
-            int row_start_A = m1_csr.row_ptrs[i];
-            int row_end_A = m1_csr.row_ptrs[i + 1];
+                for (int i = bi; i < std::min(bi + TILE_SIZE, n); ++i) {
+                    float* out_row = res + i * m;
+                    std::fill(out_row + bj, out_row + std::min(bj + TILE_SIZE, m), 0.0f);
 
-            for (int j = 0; j < m; ++j) {
-                int row_start_B = m2t_csr.row_ptrs[j];
-                int row_end_B = m2t_csr.row_ptrs[j + 1];
+                    int row_start_A = m1_csr.row_ptrs[i];
+                    int row_end_A   = m1_csr.row_ptrs[i + 1];
 
-                float sum = 0.0f;
-                int ptrA = row_start_A, ptrB = row_start_B;
+                    for (int p = row_start_A; p < row_end_A; ++p) {
+                        int colA = m1_csr.col_indices[p];
+                        float valA = m1_csr.values[p];
 
-                while (ptrA < row_end_A && ptrB < row_end_B) {
-                    int colA = m1_csr.col_indices[ptrA];
-                    int colB = m2t_csr.col_indices[ptrB];
+                        int row_start_B = m2t_csr.row_ptrs[colA];
+                        int row_end_B = m2t_csr.row_ptrs[colA + 1];
 
-                    if (colA < colB) {
-                        ++ptrA;
-                    } else if (colA > colB) {
-                        ++ptrB;
-                    } else {
-                        sum += m1_csr.values[ptrA] * m2t_csr.values[ptrB];
-                        ++ptrA;
-                        ++ptrB;
+                        for (int q = row_start_B; q < row_end_B; ++q) {
+                            int colB = m2t_csr.col_indices[q];
+                            if (colB >= bj && colB < bj + TILE_SIZE) {
+                                out_row[colB] += valA * m2t_csr.values[q];
+                            }
+                        }
                     }
                 }
-
-                out_row[j] = sum;
             }
         }
+
 
         sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
         sol_fs.close();
