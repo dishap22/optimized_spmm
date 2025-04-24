@@ -10,3 +10,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib) # Set libs dir to 
 
 add_subdirectory(src)
 add_subdirectory(tester)
+
+add_executable(benchmark src/benchmark.cpp)
+find_package(OpenMP REQUIRED)
+target_link_libraries(benchmark PRIVATE OpenMP::OpenMP_CXX)
