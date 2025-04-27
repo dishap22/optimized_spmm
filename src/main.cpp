@@ -133,6 +133,9 @@ namespace solution {
         for (int i = 0; i < n * m; ++i) res[i] = 0.0f;
 
         const int TILE = 32;
+
+        auto comp_start = std::chrono::high_resolution_clock::now();
+
         #pragma omp parallel for schedule(static) num_threads(64)
         for (int i = 0; i < n; ++i) {
             float* out_row = res + i * m;
@@ -161,6 +164,9 @@ namespace solution {
             }
         }
 
+        auto comp_end = std::chrono::high_resolution_clock::now();
+        double comp_time = std::chrono::duration<double>(comp_end - comp_start).count();
+        std::cerr << "[compute] Pure multiplication time: " << comp_time << " seconds\n";
 
         sol_fs.write(reinterpret_cast<const char*>(result.get()), sizeof(float) * n * m);
         sol_fs.close();

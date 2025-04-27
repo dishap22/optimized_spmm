@@ -3,9 +3,9 @@
 #include <random>
 #include <chrono>
 #include <string>
-#include "main.cpp"
+#include "src/main.cpp"
 
-void generate_matrix(const std::string& filename, int rows, int cols, float sparsity = 0.1f) {
+void generate_matrix(const std::string& filename, int rows, int cols, float sparsity = 0.999f) {
     std::ofstream out(filename, std::ios::binary);
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> dist_value(0.1f, 10.0f);
@@ -26,7 +26,8 @@ int main() {
     std::cout << "Generating matrices..." << std::endl;
     generate_matrix(m1, n, k); // A: n x k
     generate_matrix(m2, k, m); // B: k x m
-
+    // m1 = "../matrixA.dat";
+    // m2 = "../matrixB.dat";
     std::cout << "Running computation..." << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
     std::string output = solution::compute(m1, m2, n, k, m);

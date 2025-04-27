@@ -8,3 +8,4 @@ cd build
 cmake .. && make -j
 cd ..
 ./build/bin/tester 2048 2048 2048 111
+./build/benchmark
