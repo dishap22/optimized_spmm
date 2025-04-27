@@ -3,7 +3,97 @@
 #include <random>
 #include <chrono>
 #include <string>
+#include <vector>
+#include <unordered_map>
+#include <algorithm>
+#include <sstream>
 #include "src/main.cpp"
+
+bool convert_lastfm_to_dat(const std::string& lastfm_filename, const std::string& dat_filename, int& rows, int& cols) {
+    std::ifstream lastfm_file(lastfm_filename);
+    if (!lastfm_file.is_open()) {
+        std::cerr << "Error: Could not open file: " << lastfm_filename << std::endl;
+        return false;
+    }
+
+    std::string line;
+    std::unordered_map<int, int> node_id_map;
+    std::vector<std::pair<int, int>> edges;
+    int next_compact_id = 0;
+    bool first_line = true;
+
+    // Process each line
+    while (std::getline(lastfm_file, line)) {
+        // Skip header line
+        if (first_line) {
+            first_line = false;
+            continue;
+        }
+
+        std::istringstream iss(line);
+        std::string from_str, to_str;
+
+        // Read tab-separated values
+        if (!std::getline(iss, from_str, ',') || !std::getline(iss, to_str)) {
+            std::cerr << "Error: Could not parse line: " << line << std::endl;
+            continue;
+        }
+
+        // Convert strings to integers
+        int from_node, to_node;
+        try {
+            from_node = std::stoi(from_str);
+            to_node = std::stoi(to_str);
+        } catch (const std::exception& e) {
+            std::cerr << "Error converting node IDs to integers: " << e.what() << std::endl;
+            continue;
+        }
+
+        // Map original IDs to compact sequential IDs
+        if (node_id_map.find(from_node) == node_id_map.end()) {
+            node_id_map[from_node] = next_compact_id++;
+        }
+        if (node_id_map.find(to_node) == node_id_map.end()) {
+            node_id_map[to_node] = next_compact_id++;
+        }
+
+        // Store edges with remapped IDs
+        edges.emplace_back(node_id_map[from_node], node_id_map[to_node]);
+    }
+
+    // Number of unique nodes
+    rows = node_id_map.size();
+    cols = rows;
+
+    std::cout << "Creating adjacency matrix of size " << rows << "x" << cols << " ("
+              << edges.size() << " edges)..." << std::endl;
+
+    // Create adjacency matrix (initialized with zeros)
+    std::vector<float> matrix(rows * cols, 0.0f);
+
+    // Fill the adjacency matrix with 1.0 for each edge
+    for (const auto& edge : edges) {
+        int from_node = edge.first;
+        int to_node = edge.second;
+
+        // Place 1.0 to indicate an edge
+        matrix[from_node * cols + to_node] = 1.0f;
+    }
+
+    // Write to binary .dat file
+    std::ofstream dat_file(dat_filename, std::ios::binary);
+    if (!dat_file.is_open()) {
+        std::cerr << "Error: Could not open output .dat file: " << dat_filename << std::endl;
+        return false;
+    }
+
+    dat_file.write(reinterpret_cast<char*>(matrix.data()), matrix.size() * sizeof(float));
+    dat_file.close();
+
+    std::cout << "Successfully converted " << lastfm_filename << " to " << dat_filename << std::endl;
+    std::cout << "Matrix dimensions: " << rows << " x " << cols << std::endl;
+    return true;
+}
 
 bool convert_mm_to_dat(const std::string& mm_filename, const std::string& dat_filename, int& rows, int& cols) {
     std::ifstream mm_file(mm_filename);
@@ -94,6 +184,8 @@ int main() {
     std::string m2 = "matrixB.dat";
     std::string sparsesuit_path = "bcsstk13.mtx";
     std::string m3 = "matrixC.dat";
+    std::string m4 = "matrixD.dat";
+    std::string snap_dataset = "lastfm_asia_target.csv";
 
     std::cout << "Generating matrices..." << std::endl;
     generate_matrix(m1, n, k); // A: n x k
@@ -122,6 +214,19 @@ int main() {
     double time_sec2 = std::chrono::duration<double>(end2 - start2).count();
     std::cout << "Time taken: " << time_sec2 << " seconds\n";
     std::cout << "Output file: " << output2 << std::endl;
+
+    if (!convert_lastfm_to_dat(snap_dataset, m4, rowsA, colsA)) {
+        std::cerr << "Error converting" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Multiplying lastfm with itself..." << std::endl;
+    auto start3 = std::chrono::high_resolution_clock::now();
+    std::string output3 = solution::compute(m4, m4, rowsA, colsA, rowsA);
+    auto end3 = std::chrono::high_resolution_clock::now();
+    double time_sec3 = std::chrono::duration<double>(end3 - start3).count();
+    std::cout << "Time taken: " << time_sec3 << " seconds\n";
+    std::cout << "Output file: " << output3 << std::endl;
 
 
     return 0;
